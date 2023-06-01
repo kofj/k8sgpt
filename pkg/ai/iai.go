@@ -25,12 +25,14 @@ var (
 		&AzureAIClient{},
 		&LocalAIClient{},
 		&NoOpAIClient{},
+		&NetdAIClient{},
 	}
 	Backends = []string{
 		"openai",
 		"localai",
 		"azureopenai",
 		"noopai",
+		"netd",
 	}
 )
 

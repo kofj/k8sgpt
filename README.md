@@ -346,6 +346,7 @@ Active:
 Unused:
 > localai
 > noopai
+> netd
 
 ```
 

@@ -15,11 +15,12 @@ package generate
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
+
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"os/exec"
-	"runtime"
 )
 
 var (
@@ -34,15 +35,19 @@ var GenerateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 
 		backendType := viper.GetString("backend_type")
-		if backendType == "" {
-			// Set the default backend
-			backend = "openai"
-		}
 		// override the default backend if a flag is provided
 		if backend != "" {
 			backendType = backend
 		}
+		if backendType == "" {
+			// Set the default backend
+			backend = "openai"
+		}
 		fmt.Println("")
+		if backend == "netd" {
+			openbrowser("https://netd.fun/token")
+			return
+		}
 		openbrowser("https://beta.openai.com/account/api-keys")
 	},
 }
@@ -70,19 +75,19 @@ func openbrowser(url string) {
 	default:
 		err = fmt.Errorf("unsupported platform")
 	}
-	printInstructions(isGui, backend)
+	printInstructions(isGui, url, backend)
 	if err != nil {
 		fmt.Println(err)
 	}
 }
 
-func printInstructions(isGui bool, backendType string) {
+func printInstructions(isGui bool, url, backendType string) {
 	fmt.Println("")
 	if isGui {
-		color.Green("Opening: https://beta.openai.com/account/api-keys to generate a key for %s", backendType)
+		color.Green("Opening: %s to generate a key for %s", url, backendType)
 		fmt.Println("")
 	} else {
-		color.Green("Please open: https://beta.openai.com/account/api-keys to generate a key for %s", backendType)
+		color.Green("Please open: %s to generate a key for %s", url, backendType)
 		fmt.Println("")
 	}
 	color.Green("Please copy the generated key and run `k8sgpt auth` to add it to your config file")

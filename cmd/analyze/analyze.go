@@ -43,7 +43,6 @@ var AnalyzeCmd = &cobra.Command{
 	Long: `This command will find problems within your Kubernetes cluster and
 	provide you with a list of issues that need to be resolved`,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		// AnalysisResult configuration
 		config, err := analysis.NewAnalysis(backend,
 			language, filters, namespace, nocache, explain, maxConcurrency, withDoc)
