@@ -15,11 +15,14 @@ package integration
 
 import (
 	"errors"
-	"os"
-	"strings"
+	"fmt"
 
-	"github.com/fatih/color"
+	"github.com/k8sgpt-ai/k8sgpt/pkg/integration/aws"
+	"github.com/k8sgpt-ai/k8sgpt/pkg/integration/kyverno"
+
 	"github.com/k8sgpt-ai/k8sgpt/pkg/common"
+	"github.com/k8sgpt-ai/k8sgpt/pkg/integration/keda"
+	"github.com/k8sgpt-ai/k8sgpt/pkg/integration/prometheus"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/integration/trivy"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/util"
 	"github.com/spf13/viper"
@@ -32,10 +35,12 @@ type IIntegration interface {
 	UnDeploy(namespace string) error
 	//
 	AddAnalyzer(*map[string]common.IAnalyzer)
-	// RemoveAnalyzer removes an analyzer from the cluster
-	RemoveAnalyzer() error
 
-	GetAnalyzerName() string
+	GetAnalyzerName() []string
+	// An integration must keep record of its deployed namespace (if not using --no-install)
+	GetNamespace() (string, error)
+
+	OwnsAnalyzer(string) bool
 
 	IsActivate() bool
 }
@@ -44,7 +49,11 @@ type Integration struct {
 }
 
 var integrations = map[string]IIntegration{
-	"trivy": trivy.NewTrivy(),
+	"trivy":      trivy.NewTrivy(),
+	"prometheus": prometheus.NewPrometheus(),
+	"aws":        aws.NewAWS(),
+	"keda":       keda.NewKeda(),
+	"kyverno":    kyverno.NewKyverno(),
 }
 
 func NewIntegration() *Integration {
@@ -66,30 +75,37 @@ func (*Integration) Get(name string) (IIntegration, error) {
 	return integrations[name], nil
 }
 
-func (*Integration) Activate(name string, namespace string, activeFilters []string) error {
+func (i *Integration) AnalyzerByIntegration(input string) (string, error) {
+
+	for _, name := range i.List() {
+		if integ, err := i.Get(name); err == nil {
+			if integ.OwnsAnalyzer(input) {
+				return name, nil
+			}
+		}
+	}
+	return "", errors.New("analyzerbyintegration: no matches found")
+}
+
+func (*Integration) Activate(name string, namespace string, activeFilters []string, skipInstall bool) error {
 	if _, ok := integrations[name]; !ok {
 		return errors.New("integration not found")
 	}
 
-	mergedFilters := append(activeFilters, integrations[name].GetAnalyzerName())
-
-	uniqueFilters, dupplicatedFilters := util.RemoveDuplicates(mergedFilters)
-
-	// Verify dupplicate
-	if len(dupplicatedFilters) != 0 {
-		color.Red("Integration already activated : %s", strings.Join(dupplicatedFilters, ", "))
-		os.Exit(1)
+	if !skipInstall {
+		if err := integrations[name].Deploy(namespace); err != nil {
+			return fmt.Errorf("failed to deploy %s integration: %w", name, err)
+		}
 	}
+	mergedFilters := activeFilters
+	mergedFilters = append(mergedFilters, integrations[name].GetAnalyzerName()...)
+	uniqueFilters, _ := util.RemoveDuplicates(mergedFilters)
 
 	viper.Set("active_filters", uniqueFilters)
 
-	if err := integrations[name].Deploy(namespace); err != nil {
-		return err
-	}
-
 	if err := viper.WriteConfig(); err != nil {
-		color.Red("Error writing config file: %s", err.Error())
-		os.Exit(1)
+		return fmt.Errorf("error writing config file: %s", err.Error())
+
 	}
 
 	return nil
@@ -102,30 +118,25 @@ func (*Integration) Deactivate(name string, namespace string) error {
 
 	activeFilters := viper.GetStringSlice("active_filters")
 
-	// Update filters
-	// This might be a bad idea, but we cannot reference analyzer here
-	foundFilter := false
-	for i, v := range activeFilters {
-		if v == integrations[name].GetAnalyzerName() {
-			foundFilter = true
-			activeFilters = append(activeFilters[:i], activeFilters[i+1:]...)
-			break
+	// Update filters and remove the specific filters for the integration
+	for _, filter := range integrations[name].GetAnalyzerName() {
+		for x, af := range activeFilters {
+			if af == filter {
+				activeFilters = append(activeFilters[:x], activeFilters[x+1:]...)
+			}
 		}
-	}
-	if !foundFilter {
-		color.Red("Ingregation %s does not exist in configuration file. Please use k8sgpt integration add.", name)
-		os.Exit(1)
+
 	}
 
 	if err := integrations[name].UnDeploy(namespace); err != nil {
-		return err
+		return fmt.Errorf("failed to undeploy %s integration: %w", name, err)
 	}
 
 	viper.Set("active_filters", activeFilters)
 
 	if err := viper.WriteConfig(); err != nil {
-		color.Red("Error writing config file: %s", err.Error())
-		os.Exit(1)
+		return fmt.Errorf("error writing config file: %s", err.Error())
+
 	}
 
 	return nil

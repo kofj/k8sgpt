@@ -3,15 +3,41 @@
   "extends": [
     "config:base",
     "helpers:pinGitHubActionDigests",
-    ":gitSignOff"
-
+    ":gitSignOff",
+    "group:allNonMajor"
   ],
   "addLabels": ["dependencies"],
   "postUpdateOptions": [
     "gomodTidy",
     "gomodMassage"
   ],
+  "automerge": true,
+  "automergeType": "pr",
+  "schedule": [
+    "at any time"
+  ],
+  "platformAutomerge": true,
   "packageRules": [
+    {
+      "matchPackageNames": ["azure-sdk-for-go"],
+      "enabled": true,
+      "groupName": "azure-group"
+    },
+    {
+      "matchPackageNames": ["prometheus"],
+      "enabled": true,
+      "groupName": "prometheus-group"
+    },
+    {
+      "matchPackageNames": ["k8s.io", "sigs.k8s.io"],
+      "enabled": true,
+      "groupName": "kubernetes-group"
+    },
+    {
+      "matchPackageNames": ["golang"],
+      "enabled": true,
+      "groupName": "golang-group"
+    },
     {
       "matchUpdateTypes": ["minor", "patch"],
       "matchCurrentVersion": "!/^0/",

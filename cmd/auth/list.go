@@ -23,6 +23,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+var details bool
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured providers",
@@ -44,7 +46,7 @@ var listCmd = &cobra.Command{
 			fmt.Printf("> %s\n", color.BlueString("openai"))
 		}
 
-		// Get list of all AI Backends and only print htem if they are not in the provider list
+		// Get list of all AI Backends and only print them if they are not in the provider list
 		fmt.Print(color.YellowString("Active: \n"))
 		for _, aiBackend := range ai.Backends {
 			providerExists := false
@@ -55,6 +57,13 @@ var listCmd = &cobra.Command{
 			}
 			if providerExists {
 				fmt.Printf("> %s\n", color.GreenString(aiBackend))
+				if details {
+					for _, provider := range configAI.Providers {
+						if provider.Name == aiBackend {
+							printDetails(provider)
+						}
+					}
+				}
 			}
 		}
 		fmt.Print(color.YellowString("Unused: \n"))
@@ -70,4 +79,20 @@ var listCmd = &cobra.Command{
 			}
 		}
 	},
+}
+
+func init() {
+	listCmd.Flags().BoolVar(&details, "details", false, "Print active provider configuration details")
+}
+
+func printDetails(provider ai.AIProvider) {
+	if provider.Model != "" {
+		fmt.Printf("   - Model: %s\n", provider.Model)
+	}
+	if provider.Engine != "" {
+		fmt.Printf("   - Engine: %s\n", provider.Engine)
+	}
+	if provider.BaseURL != "" {
+		fmt.Printf("   - BaseURL: %s\n", provider.BaseURL)
+	}
 }

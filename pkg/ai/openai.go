@@ -15,41 +15,72 @@ package ai
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
-	"fmt"
-	"strings"
-
-	"github.com/k8sgpt-ai/k8sgpt/pkg/cache"
-	"github.com/k8sgpt-ai/k8sgpt/pkg/util"
+	"net/http"
+	"net/url"
 
 	"github.com/sashabaranov/go-openai"
-
-	"github.com/fatih/color"
 )
 
+const openAIClientName = "openai"
+
 type OpenAIClient struct {
-	client   *openai.Client
-	language string
-	model    string
+	nopCloser
+
+	client      *openai.Client
+	model       string
+	temperature float32
+	topP        float32
+	// organizationId string
 }
 
-func (c *OpenAIClient) Configure(config IAIConfig, language string) error {
+const (
+	// OpenAI completion parameters
+	maxToken         = 2048
+	presencePenalty  = 0.0
+	frequencyPenalty = 0.0
+)
+
+func (c *OpenAIClient) Configure(config IAIConfig) error {
 	token := config.GetPassword()
 	defaultConfig := openai.DefaultConfig(token)
+	orgId := config.GetOrganizationId()
+	proxyEndpoint := config.GetProxyEndpoint()
 
 	baseURL := config.GetBaseURL()
 	if baseURL != "" {
 		defaultConfig.BaseURL = baseURL
 	}
 
+	transport := &http.Transport{}
+	if proxyEndpoint != "" {
+		proxyUrl, err := url.Parse(proxyEndpoint)
+		if err != nil {
+			return err
+		}
+		transport.Proxy = http.ProxyURL(proxyUrl)
+	}
+
+	if orgId != "" {
+		defaultConfig.OrgID = orgId
+	}
+
+	customHeaders := config.GetCustomHeaders()
+	defaultConfig.HTTPClient = &http.Client{
+		Transport: &OpenAIHeaderTransport{
+			Origin:  transport,
+			Headers: customHeaders,
+		},
+	}
+
 	client := openai.NewClientWithConfig(defaultConfig)
 	if client == nil {
 		return errors.New("error creating OpenAI client")
 	}
-	c.language = language
 	c.client = client
 	c.model = config.GetModel()
+	c.temperature = config.GetTemperature()
+	c.topP = config.GetTopP()
 	return nil
 }
 
@@ -60,9 +91,14 @@ func (c *OpenAIClient) GetCompletion(ctx context.Context, prompt string) (string
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: fmt.Sprintf(default_prompt, c.language, prompt),
+				Content: prompt,
 			},
 		},
+		Temperature:      c.temperature,
+		MaxTokens:        maxToken,
+		PresencePenalty:  presencePenalty,
+		FrequencyPenalty: frequencyPenalty,
+		TopP:             c.topP,
 	})
 	if err != nil {
 		return "", err
@@ -70,42 +106,28 @@ func (c *OpenAIClient) GetCompletion(ctx context.Context, prompt string) (string
 	return resp.Choices[0].Message.Content, nil
 }
 
-func (a *OpenAIClient) Parse(ctx context.Context, prompt []string, cache cache.ICache) (string, error) {
-	inputKey := strings.Join(prompt, " ")
-	// Check for cached data
-	cacheKey := util.GetCacheKey(a.GetName(), a.language, inputKey)
-
-	if !cache.IsCacheDisabled() && cache.Exists(cacheKey) {
-		response, err := cache.Load(cacheKey)
-		if err != nil {
-			return "", err
-		}
-
-		if response != "" {
-			output, err := base64.StdEncoding.DecodeString(response)
-			if err != nil {
-				color.Red("error decoding cached data: %v", err)
-				return "", nil
-			}
-			return string(output), nil
-		}
-	}
-
-	response, err := a.GetCompletion(ctx, inputKey)
-	if err != nil {
-		return "", err
-	}
-
-	err = cache.Store(cacheKey, base64.StdEncoding.EncodeToString([]byte(response)))
-
-	if err != nil {
-		color.Red("error storing value to cache: %v", err)
-		return "", nil
-	}
-
-	return response, nil
+func (c *OpenAIClient) GetName() string {
+	return openAIClientName
 }
 
-func (a *OpenAIClient) GetName() string {
-	return "openai"
+// OpenAIHeaderTransport is an http.RoundTripper that adds the given headers to each request.
+type OpenAIHeaderTransport struct {
+	Origin  http.RoundTripper
+	Headers []http.Header
+}
+
+// RoundTrip implements the http.RoundTripper interface.
+func (t *OpenAIHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone the request to avoid modifying the original request
+	clonedReq := req.Clone(req.Context())
+	for _, header := range t.Headers {
+		for key, values := range header {
+			// Possible values per header:  RFC 2616
+			for _, value := range values {
+				clonedReq.Header.Add(key, value)
+			}
+		}
+	}
+
+	return t.Origin.RoundTrip(clonedReq)
 }

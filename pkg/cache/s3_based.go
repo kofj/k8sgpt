@@ -2,11 +2,13 @@ package cache
 
 import (
 	"bytes"
+	"crypto/tls"
+	"log"
+	"net/http"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/spf13/viper"
 )
 
 // Generate ICache implementation
@@ -14,6 +16,53 @@ type S3Cache struct {
 	noCache    bool
 	bucketName string
 	session    *s3.S3
+}
+
+type S3CacheConfiguration struct {
+	Region             string `mapstructure:"region" yaml:"region,omitempty"`
+	BucketName         string `mapstructure:"bucketname" yaml:"bucketname,omitempty"`
+	Endpoint           string `mapstructure:"endpoint" yaml:"endpoint,omitempty"`
+	InsecureSkipVerify bool   `mapstructure:"insecure" yaml:"insecure,omitempty"`
+}
+
+func (s *S3Cache) Configure(cacheInfo CacheProvider) error {
+	if cacheInfo.S3.BucketName == "" {
+		log.Fatal("Bucket name not configured")
+	}
+	s.bucketName = cacheInfo.S3.BucketName
+
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+		Config: aws.Config{
+			Region: aws.String(cacheInfo.S3.Region),
+		},
+	}))
+	if cacheInfo.S3.Endpoint != "" {
+		sess.Config.Endpoint = &cacheInfo.S3.Endpoint
+		sess.Config.S3ForcePathStyle = aws.Bool(true)
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: cacheInfo.S3.InsecureSkipVerify},
+		}
+		customClient := &http.Client{Transport: transport}
+		sess.Config.HTTPClient = customClient
+	}
+
+	s3Client := s3.New(sess)
+
+	// Check if the bucket exists, if not create it
+	_, err := s3Client.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(cacheInfo.S3.BucketName),
+	})
+	if err != nil {
+		_, err = s3Client.CreateBucket(&s3.CreateBucketInput{
+			Bucket: aws.String(cacheInfo.S3.BucketName),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	s.session = s3Client
+	return nil
 }
 
 func (s *S3Cache) Store(key string, data string) error {
@@ -25,6 +74,18 @@ func (s *S3Cache) Store(key string, data string) error {
 	})
 	return err
 
+}
+
+func (s *S3Cache) Remove(key string) error {
+	_, err := s.session.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: &s.bucketName,
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *S3Cache) Load(key string) (string, error) {
@@ -39,12 +100,12 @@ func (s *S3Cache) Load(key string) (string, error) {
 	}
 
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(result.Body)
+	_, err_read := buf.ReadFrom(result.Body)
 	result.Body.Close()
-	return buf.String(), nil
+	return buf.String(), err_read
 }
 
-func (s *S3Cache) List() ([]string, error) {
+func (s *S3Cache) List() ([]CacheObjectDetails, error) {
 
 	// List the files in the bucket
 	result, err := s.session.ListObjectsV2(&s3.ListObjectsV2Input{Bucket: aws.String(s.bucketName)})
@@ -52,9 +113,12 @@ func (s *S3Cache) List() ([]string, error) {
 		return nil, err
 	}
 
-	var keys []string
+	var keys []CacheObjectDetails
 	for _, item := range result.Contents {
-		keys = append(keys, *item.Key)
+		keys = append(keys, CacheObjectDetails{
+			Name:      *item.Key,
+			UpdatedAt: *item.LastModified,
+		})
 	}
 
 	return keys, nil
@@ -74,45 +138,10 @@ func (s *S3Cache) IsCacheDisabled() bool {
 	return s.noCache
 }
 
-func NewS3Cache(nocache bool) ICache {
+func (s *S3Cache) GetName() string {
+	return "s3"
+}
 
-	var cache CacheProvider
-	err := viper.UnmarshalKey("cache", &cache)
-	if err != nil {
-		panic(err)
-	}
-	if cache.BucketName == "" {
-		panic("Bucket name not configured")
-	}
-	if cache.Region == "" {
-		panic("Region not configured")
-	}
-
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-		Config: aws.Config{
-			Region: aws.String(cache.Region),
-		},
-	}))
-
-	s := s3.New(sess)
-
-	// Check if the bucket exists, if not create it
-	_, err = s.HeadBucket(&s3.HeadBucketInput{
-		Bucket: aws.String(cache.BucketName),
-	})
-	if err != nil {
-		_, err = s.CreateBucket(&s3.CreateBucketInput{
-			Bucket: aws.String(cache.BucketName),
-		})
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	return &S3Cache{
-		noCache:    nocache,
-		session:    s,
-		bucketName: cache.BucketName,
-	}
+func (s *S3Cache) DisableCache() {
+	s.noCache = true
 }

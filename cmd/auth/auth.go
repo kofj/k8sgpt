@@ -19,11 +19,20 @@ import (
 )
 
 var (
-	backend  string
-	password string
-	baseURL  string
-	model    string
-	engine   string
+	backend        string
+	password       string
+	baseURL        string
+	endpointName   string
+	model          string
+	engine         string
+	temperature    float32
+	providerRegion string
+	providerId     string
+	compartmentId  string
+	topP           float32
+	topK           int32
+	maxTokens      int
+	organizationId string
 )
 
 var configAI ai.AIConfiguration
@@ -50,4 +59,6 @@ func init() {
 	AuthCmd.AddCommand(removeCmd)
 	// add subcommand to set default backend provider
 	AuthCmd.AddCommand(defaultCmd)
+	// add subcommand to update backend provider
+	AuthCmd.AddCommand(updateCmd)
 }

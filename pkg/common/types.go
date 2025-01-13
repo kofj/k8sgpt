@@ -15,16 +15,21 @@ package common
 
 import (
 	"context"
+	"time"
 
 	trivy "github.com/aquasecurity/trivy-operator/pkg/apis/aquasecurity/v1alpha1"
 	openapi_v2 "github.com/google/gnostic/openapiv2"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/ai"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/kubernetes"
+	keda "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
+	kyverno "github.com/kyverno/policy-reporter-kyverno-plugin/pkg/crd/api/policyreport/v1alpha2"
+	regv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
-	autov1 "k8s.io/api/autoscaling/v1"
+	autov2 "k8s.io/api/autoscaling/v2"
 	v1 "k8s.io/api/core/v1"
 	networkv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	gtwapi "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 type IAnalyzer interface {
@@ -35,6 +40,7 @@ type Analyzer struct {
 	Client        *kubernetes.Client
 	Context       context.Context
 	Namespace     string
+	LabelSelector string
 	AIClient      ai.IAI
 	PreAnalysis   map[string]PreAnalysis
 	Results       []Result
@@ -49,13 +55,22 @@ type PreAnalysis struct {
 	PersistentVolumeClaim    v1.PersistentVolumeClaim
 	Endpoint                 v1.Endpoints
 	Ingress                  networkv1.Ingress
-	HorizontalPodAutoscalers autov1.HorizontalPodAutoscaler
+	HorizontalPodAutoscalers autov2.HorizontalPodAutoscaler
 	PodDisruptionBudget      policyv1.PodDisruptionBudget
 	StatefulSet              appsv1.StatefulSet
 	NetworkPolicy            networkv1.NetworkPolicy
 	Node                     v1.Node
+	ValidatingWebhook        regv1.ValidatingWebhookConfiguration
+	MutatingWebhook          regv1.MutatingWebhookConfiguration
+	GatewayClass             gtwapi.GatewayClass
+	Gateway                  gtwapi.Gateway
+	HTTPRoute                gtwapi.HTTPRoute
 	// Integrations
-	TrivyVulnerabilityReport trivy.VulnerabilityReport
+	ScaledObject               keda.ScaledObject
+	TrivyVulnerabilityReport   trivy.VulnerabilityReport
+	TrivyConfigAuditReport     trivy.ConfigAuditReport
+	KyvernoPolicyReport        kyverno.PolicyReport
+	KyvernoClusterPolicyReport kyverno.ClusterPolicyReport
 }
 
 type Result struct {
@@ -64,6 +79,11 @@ type Result struct {
 	Error        []Failure `json:"error"`
 	Details      string    `json:"details"`
 	ParentObject string    `json:"parentObject"`
+}
+
+type AnalysisStats struct {
+	Analyzer     string        `json:"analyzer"`
+	DurationTime time.Duration `json:"durationTime"`
 }
 
 type Failure struct {

@@ -14,12 +14,11 @@ limitations under the License.
 package kubernetes
 
 import (
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/kubectl/pkg/scheme"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func (c *Client) GetConfig() *rest.Config {
@@ -30,14 +29,14 @@ func (c *Client) GetClient() kubernetes.Interface {
 	return c.Client
 }
 
-func (c *Client) GetRestClient() rest.Interface {
-	return c.RestClient
+func (c *Client) GetCtrlClient() ctrl.Client {
+	return c.CtrlClient
 }
 
 func NewClient(kubecontext string, kubeconfig string) (*Client, error) {
 	var config *rest.Config
 	config, err := rest.InClusterConfig()
-	if err != nil {
+	if kubeconfig != "" || err != nil {
 		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 
 		if kubeconfig != "" {
@@ -59,11 +58,8 @@ func NewClient(kubecontext string, kubeconfig string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.APIPath = "/api"
-	config.GroupVersion = &scheme.Scheme.PrioritizedVersionsForGroup("")[0]
-	config.NegotiatedSerializer = serializer.WithoutConversionCodecFactory{CodecFactory: scheme.Codecs}
 
-	restClient, err := rest.RESTClientFor(config)
+	ctrlClient, err := ctrl.New(config, ctrl.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +71,7 @@ func NewClient(kubecontext string, kubeconfig string) (*Client, error) {
 
 	return &Client{
 		Client:        clientSet,
-		RestClient:    restClient,
+		CtrlClient:    ctrlClient,
 		Config:        config,
 		ServerVersion: serverVersion,
 	}, nil

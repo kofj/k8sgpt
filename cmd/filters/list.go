@@ -15,9 +15,11 @@ package filters
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/fatih/color"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/analyzer"
+	"github.com/k8sgpt-ai/k8sgpt/pkg/integration"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/util"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -30,7 +32,7 @@ var listCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		activeFilters := viper.GetStringSlice("active_filters")
 		coreFilters, additionalFilters, integrationFilters := analyzer.ListFilters()
-
+		integration := integration.NewIntegration()
 		availableFilters := append(append(coreFilters, additionalFilters...), integrationFilters...)
 
 		if len(activeFilters) == 0 {
@@ -39,12 +41,17 @@ var listCmd = &cobra.Command{
 		inactiveFilters := util.SliceDiff(availableFilters, activeFilters)
 		fmt.Print(color.YellowString("Active: \n"))
 		for _, filter := range activeFilters {
-
 			// if the filter is an integration, mark this differently
-			if util.SliceContainsString(integrationFilters, filter) {
+			// but if the integration is inactive, remove
+			if slices.Contains(integrationFilters, filter) {
 				fmt.Printf("> %s\n", color.BlueString("%s (integration)", filter))
 			} else {
-				fmt.Printf("> %s\n", color.GreenString(filter))
+				// This strange bit of logic will loop through every integration via
+				// OwnsAnalyzer subcommand to check the filter and as the integrationFilters...
+				// was no match, we know this isn't part of an active integration
+				if _, err := integration.AnalyzerByIntegration(filter); err != nil {
+					fmt.Printf("> %s\n", color.GreenString(filter))
+				}
 			}
 		}
 
@@ -53,13 +60,12 @@ var listCmd = &cobra.Command{
 			fmt.Print(color.YellowString("Unused: \n"))
 			for _, filter := range inactiveFilters {
 				// if the filter is an integration, mark this differently
-				if util.SliceContainsString(integrationFilters, filter) {
+				if slices.Contains(integrationFilters, filter) {
 					fmt.Printf("> %s\n", color.BlueString("%s (integration)", filter))
 				} else {
 					fmt.Printf("> %s\n", color.RedString(filter))
 				}
 			}
 		}
-
 	},
 }
